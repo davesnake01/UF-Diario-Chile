@@ -1,0 +1,54 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="certifi" />
+          <option value="elastic-transport" />
+          <option value="et-xmlfile" />
+          <option value="openpyxl" />
+          <option value="pytz" />
+          <option value="tzdata" />
+          <option value="anyio" />
+          <option value="async-generator" />
+          <option value="attrs" />
+          <option value="charset-normalizer" />
+          <option value="dacite" />
+          <option value="elasticsearch" />
+          <option value="h11" />
+          <option value="idna" />
+          <option value="importlib_metadata" />
+          <option value="mypy_extensions" />
+          <option value="numpy" />
+          <option value="outcome" />
+          <option value="packaging" />
+          <option value="pandas" />
+          <option value="pillow" />
+          <option value="pyodbc" />
+          <option value="PySocks" />
+          <option value="python-dateutil" />
+          <option value="python-dotenv" />
+          <option value="rarfile" />
+          <option value="requests" />
+          <option value="selenium" />
+          <option value="six" />
+          <option value="sniffio" />
+          <option value="sortedcontainers" />
+          <option value="tcgdex-sdk" />
+          <option value="trio" />
+          <option value="trio-typing" />
+          <option value="trio-websocket" />
+          <option value="types-certifi" />
+          <option value="types-urllib3" />
+          <option value="typing_extensions" />
+          <option value="urllib3" />
+          <option value="webdriver-manager" />
+          <option value="websocket-client" />
+          <option value="wsproto" />
+          <option value="zipp" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>
