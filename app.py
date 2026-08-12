@@ -60,7 +60,7 @@ def init_db():
 def fetch_and_save_data():
     print("Consultando API oficial del Banco Central de Chile...")
     try:
-        siete = bcchapi.Siete(token=BCC_TOKEN)
+        siete = bcchapi.Siete(BCC_TOKEN)
 
         end_date = datetime.now().strftime('%Y-%m-%d')
         start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
@@ -150,4 +150,4 @@ def plata_endpoint():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5010)
