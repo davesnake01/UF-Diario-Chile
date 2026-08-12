@@ -5,8 +5,7 @@ from flask import Flask
 import psycopg2
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
-import bcchapi
-import pandas as pd
+import requests
 
 app = Flask(__name__)
 
@@ -19,7 +18,7 @@ DB_PASS = os.environ.get("DB_PASS", "postgres")
 # Token Banco Central
 BCC_TOKEN = os.environ.get("BCC_TOKEN", "tu_token")
 
-# Diccionario con los códigos de las series oficiales del BCCh
+# Códigos oficiales del BCCh
 SERIES = {
     "uf": "F073.UFF.PRE.Z.D",
     "dolar": "F073.TCO.PRE.Z.D",
@@ -57,54 +56,59 @@ def init_db():
 
 
 def fetch_and_save_data():
-    print("Consultando API oficial del Banco Central de Chile...")
+    print("Consultando API REST del Banco Central directamente...")
 
-    # --- DIAGNÓSTICO DE TOKEN ---
-    token_oculto = BCC_TOKEN[:7] + "..." if BCC_TOKEN else "VACÍO"
-    print(f"Token recibido en el contenedor: {token_oculto} (Longitud: {len(str(BCC_TOKEN))})")
+    # Formato requerido por la URL de la API: YYYY-MM-DD
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
 
-    if "$" not in str(BCC_TOKEN):
-        print(
-            "⚠️ ADVERTENCIA CRÍTICA: El token no contiene signos '$'. Docker Compose lo mutiló. Debes usar '$$' en tu variable de entorno en Coolify.")
-    # ----------------------------
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-    try:
-        siete = bcchapi.Siete(BCC_TOKEN)
+    for tipo, serie in SERIES.items():
+        try:
+            # Construimos la consulta REST directa inyectando el token
+            url = f"https://si3.bcentral.cl/SieteRestWS/SieteRestWS.ashx?function=GetSeries&timeseries={serie}&firstdate={start_date}&lastdate={end_date}&token={BCC_TOKEN}"
 
-        end_date = datetime.now().strftime('%Y-%m-%d')
-        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            response = requests.get(url, timeout=15)
 
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        for tipo, serie in SERIES.items():
+            # Si el banco devuelve un error HTML en vez de datos, lo capturamos
             try:
-                df = siete.cuadro(
-                    series=[serie],
-                    desde=start_date,
-                    hasta=end_date,
-                    nombres=[tipo]
-                )
+                data = response.json()
+            except requests.exceptions.JSONDecodeError:
+                print(
+                    f"Error crítico con {tipo}: El banco devolvió HTML en vez de JSON. Respuesta cruda: {response.text[:200]}")
+                continue
 
-                for date_index, row in df.iterrows():
-                    fecha_str = date_index.strftime('%Y-%m-%d')
-                    valor = float(row[tipo])
+            # Verificamos el código interno del Banco Central (0 = Éxito)
+            if data.get("Codigo") != 0:
+                print(f"API BCCh rechazó la consulta de {tipo}: {data.get('Descripcion')}")
+                continue
 
-                    if pd.notna(valor):
-                        cur.execute('''
-                            INSERT INTO indicadores (fecha, tipo, valor)
-                            VALUES (%s, %s, %s)
-                            ON CONFLICT (fecha, tipo) DO UPDATE SET valor = EXCLUDED.valor
-                        ''', (fecha_str, tipo, valor))
-            except Exception as ex:
-                print(f"Error específico consultando {tipo}: {ex}")
+            observaciones = data.get("Series", {}).get("Obs", [])
 
-        conn.commit()
-        cur.close()
-        conn.close()
-        print(f"Base de datos actualizada correctamente desde {start_date} hasta {end_date}.")
-    except Exception as e:
-        print(f"Error general de conexión al BCCh: {e}")
+            for obs in observaciones:
+                try:
+                    # La API oficial entrega la fecha en formato DD-MM-YYYY, la convertimos para PostgreSQL
+                    fecha_str = datetime.strptime(obs["indexDateString"], "%d-%m-%Y").strftime("%Y-%m-%d")
+                    valor = float(obs["value"])
+
+                    cur.execute('''
+                        INSERT INTO indicadores (fecha, tipo, valor)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (fecha, tipo) DO UPDATE SET valor = EXCLUDED.valor
+                    ''', (fecha_str, tipo, valor))
+                except (ValueError, KeyError):
+                    # Ignora días sin valor publicado (fines de semana o feriados)
+                    continue
+
+        except Exception as ex:
+            print(f"Error de conexión consultando la serie {tipo}: {ex}")
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    print(f"Base de datos actualizada correctamente desde {start_date} hasta {end_date}.")
 
 
 init_db()
@@ -162,5 +166,4 @@ def plata_endpoint():
 
 
 if __name__ == '__main__':
-    # Puerto ajustado a 5010
     app.run(host='0.0.0.0', port=5010)
