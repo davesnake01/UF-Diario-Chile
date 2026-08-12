@@ -19,6 +19,13 @@ DB_PASS = os.environ.get("DB_PASS", "postgres")
 # Token Banco Central (Inyectado por Coolify)
 BCC_TOKEN = os.environ.get("BCC_TOKEN", "tu_token")
 
+# Diccionario con los códigos de las series oficiales del BCCh
+SERIES = {
+    "uf": "F073.UFF.PRE.Z.D",  # Unidad de Fomento
+    "dolar": "F073.TCO.PRE.Z.D",  # Dólar Observado
+    "plata": "F073.CMB.PLA.Z.D"  # Onza Troy de Plata (Código estimado de metales)
+}
+
 
 def get_db_connection():
     return psycopg2.connect(host=DB_HOST, database=DB_NAME, user=DB_USER, password=DB_PASS)
@@ -30,16 +37,19 @@ def init_db():
         try:
             conn = get_db_connection()
             cur = conn.cursor()
+            # Creamos una tabla consolidada para manejar múltiples indicadores
             cur.execute('''
-                CREATE TABLE IF NOT EXISTS uf_data (
-                    fecha DATE PRIMARY KEY,
-                    valor NUMERIC NOT NULL
+                CREATE TABLE IF NOT EXISTS indicadores (
+                    fecha DATE,
+                    tipo VARCHAR(50),
+                    valor NUMERIC NOT NULL,
+                    PRIMARY KEY (fecha, tipo)
                 )
             ''')
             conn.commit()
             cur.close()
             conn.close()
-            print("Base de datos lista y conectada.")
+            print("Base de datos de indicadores lista y conectada.")
             break
         except Exception as e:
             print("Esperando a PostgreSQL...")
@@ -47,50 +57,51 @@ def init_db():
             time.sleep(3)
 
 
-def fetch_and_save_uf():
+def fetch_and_save_data():
     print("Consultando API oficial del Banco Central de Chile...")
     try:
-        # Instanciamos usando únicamente el token
         siete = bcchapi.Siete(token=BCC_TOKEN)
 
         end_date = datetime.now().strftime('%Y-%m-%d')
         start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
 
-        df = siete.cuadro({"UF": "F073.UFF.PRE.Z.D"}, start=start_date, end=end_date)
-
         conn = get_db_connection()
         cur = conn.cursor()
 
-        for date_index, row in df.iterrows():
-            fecha_str = date_index.strftime('%Y-%m-%d')
-            valor = float(row['UF'])
+        # Iteramos sobre todos los indicadores del diccionario
+        for tipo, serie in SERIES.items():
+            try:
+                df = siete.cuadro({tipo: serie}, start=start_date, end=end_date)
+                for date_index, row in df.iterrows():
+                    fecha_str = date_index.strftime('%Y-%m-%d')
+                    valor = float(row[tipo])
 
-            if pd.notna(valor):
-                cur.execute('''
-                    INSERT INTO uf_data (fecha, valor)
-                    VALUES (%s, %s)
-                    ON CONFLICT (fecha) DO UPDATE SET valor = EXCLUDED.valor
-                ''', (fecha_str, valor))
+                    if pd.notna(valor):
+                        cur.execute('''
+                            INSERT INTO indicadores (fecha, tipo, valor)
+                            VALUES (%s, %s, %s)
+                            ON CONFLICT (fecha, tipo) DO UPDATE SET valor = EXCLUDED.valor
+                        ''', (fecha_str, tipo, valor))
+            except Exception as ex:
+                print(f"Advertencia consultando serie {tipo} ({serie}): {ex}")
 
         conn.commit()
         cur.close()
         conn.close()
-        print("Base de datos actualizada con datos del Banco Central.")
+        print("Base de datos actualizada con UF, Dólar y Plata.")
     except Exception as e:
-        print(f"Error consultando al BCCh: {e}")
+        print(f"Error general consultando al BCCh: {e}")
 
 
 init_db()
-fetch_and_save_uf()
+fetch_and_save_data()
 
 scheduler = BackgroundScheduler(timezone=pytz.timezone('America/Santiago'))
-scheduler.add_job(fetch_and_save_uf, 'cron', hour=8, minute=0)
+scheduler.add_job(fetch_and_save_data, 'cron', hour=8, minute=0)
 scheduler.start()
 
 
-@app.route('/')
-@app.route('/uf')
-def get_uf_today():
+def get_indicador_today(tipo):
     tz_chile = pytz.timezone('America/Santiago')
     hoy = datetime.now(tz_chile).strftime('%Y-%m-%d')
 
@@ -98,11 +109,14 @@ def get_uf_today():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        cur.execute('SELECT valor FROM uf_data WHERE fecha = %s', (hoy,))
+        # Intentamos obtener el valor del día
+        cur.execute('SELECT valor FROM indicadores WHERE fecha = %s AND tipo = %s', (hoy, tipo))
         row = cur.fetchone()
 
+        # Fallback: el registro anterior más cercano si el banco aún no actualiza el día
         if not row:
-            cur.execute('SELECT valor FROM uf_data WHERE fecha <= %s ORDER BY fecha DESC LIMIT 1', (hoy,))
+            cur.execute('SELECT valor FROM indicadores WHERE fecha <= %s AND tipo = %s ORDER BY fecha DESC LIMIT 1',
+                        (hoy, tipo))
             row = cur.fetchone()
 
         cur.close()
@@ -111,11 +125,29 @@ def get_uf_today():
         if row:
             return str(row[0])
         else:
-            return "Dato no encontrado", 404
+            return f"Dato no encontrado para {tipo}", 404
 
     except Exception as e:
         return f"Error interno: {str(e)}", 500
 
 
+# ----- ENDPOINTS (Rutas web) -----
+
+@app.route('/')
+@app.route('/uf')
+def uf_endpoint():
+    return get_indicador_today('uf')
+
+
+@app.route('/dolar')
+def dolar_endpoint():
+    return get_indicador_today('dolar')
+
+
+@app.route('/plata')
+def plata_endpoint():
+    return get_indicador_today('plata')
+
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5010)
+    app.run(host='0.0.0.0', port=5000)
