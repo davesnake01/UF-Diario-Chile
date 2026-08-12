@@ -58,10 +58,19 @@ def init_db():
 
 def fetch_and_save_data():
     print("Consultando API oficial del Banco Central de Chile...")
+
+    # --- DIAGNÓSTICO DE TOKEN ---
+    token_oculto = BCC_TOKEN[:7] + "..." if BCC_TOKEN else "VACÍO"
+    print(f"Token recibido en el contenedor: {token_oculto} (Longitud: {len(str(BCC_TOKEN))})")
+
+    if "$" not in str(BCC_TOKEN):
+        print(
+            "⚠️ ADVERTENCIA CRÍTICA: El token no contiene signos '$'. Docker Compose lo mutiló. Debes usar '$$' en tu variable de entorno en Coolify.")
+    # ----------------------------
+
     try:
         siete = bcchapi.Siete(BCC_TOKEN)
 
-        # Calculamos las fechas en el formato 'YYYY-MM-DD' que pide la documentación
         end_date = datetime.now().strftime('%Y-%m-%d')
         start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
 
@@ -70,7 +79,6 @@ def fetch_and_save_data():
 
         for tipo, serie in SERIES.items():
             try:
-                # Aplicamos la sintaxis exacta de la documentación
                 df = siete.cuadro(
                     series=[serie],
                     desde=start_date,
@@ -82,7 +90,6 @@ def fetch_and_save_data():
                     fecha_str = date_index.strftime('%Y-%m-%d')
                     valor = float(row[tipo])
 
-                    # pd.notna() evita que guardemos los 'NaN' de días sin publicación (ej. fines de semana)
                     if pd.notna(valor):
                         cur.execute('''
                             INSERT INTO indicadores (fecha, tipo, valor)
@@ -90,14 +97,14 @@ def fetch_and_save_data():
                             ON CONFLICT (fecha, tipo) DO UPDATE SET valor = EXCLUDED.valor
                         ''', (fecha_str, tipo, valor))
             except Exception as ex:
-                print(f"Advertencia consultando serie {tipo} ({serie}): {ex}")
+                print(f"Error específico consultando {tipo}: {ex}")
 
         conn.commit()
         cur.close()
         conn.close()
         print(f"Base de datos actualizada correctamente desde {start_date} hasta {end_date}.")
     except Exception as e:
-        print(f"Error general consultando al BCCh: {e}")
+        print(f"Error general de conexión al BCCh: {e}")
 
 
 init_db()
