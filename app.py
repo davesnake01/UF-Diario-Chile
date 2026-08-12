@@ -22,7 +22,7 @@ BCC_TOKEN = os.environ.get("BCC_TOKEN", "tu_token")
 SERIES = {
     "uf": "F073.UFF.PRE.Z.D",
     "dolar": "F073.TCO.PRE.Z.D",
-    "plata": "F019.PPB.PRE.45.D"  # Código exacto obtenido de la API
+    "plata": "F019.PPB.PRE.45.D"  # Código exacto de la Onza Troy de Plata
 }
 
 
@@ -93,6 +93,7 @@ def fetch_and_save_data():
                         ON CONFLICT (fecha, tipo) DO UPDATE SET valor = EXCLUDED.valor
                     ''', (fecha_str, tipo, valor))
                 except (ValueError, KeyError):
+                    # Se ignoran días sin valor publicado
                     continue
 
         except Exception as ex:
@@ -120,9 +121,11 @@ def get_indicador_today(tipo):
         conn = get_db_connection()
         cur = conn.cursor()
 
+        # 1. Intenta buscar el valor del día actual
         cur.execute('SELECT valor FROM indicadores WHERE fecha = %s AND tipo = %s', (hoy, tipo))
         row = cur.fetchone()
 
+        # 2. El "Fallback": Si hoy está en blanco (ej. fin de semana), busca el último registro válido
         if not row:
             cur.execute('SELECT valor FROM indicadores WHERE fecha <= %s AND tipo = %s ORDER BY fecha DESC LIMIT 1',
                         (hoy, tipo))
