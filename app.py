@@ -18,7 +18,7 @@ DB_PASS = os.environ.get("DB_PASS", "postgres")
 # Token Banco Central
 BCC_TOKEN = os.environ.get("BCC_TOKEN", "tu_token")
 
-# Códigos oficiales del BCCh actualizados
+# Códigos oficiales del BCCh actualizados, no quiero usar su libreria, no funciona!
 SERIES = {
     "uf": "F073.UFF.PRE.Z.D",
     "dolar": "F073.TCO.PRE.Z.D",
@@ -121,11 +121,12 @@ def get_indicador_today(tipo):
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # 1. Intenta buscar el valor del día actual
+        # 1. Intenta buscar el valor del día actual, si no lo trae, me quedo con el último valor conocido.
         cur.execute('SELECT valor FROM indicadores WHERE fecha = %s AND tipo = %s', (hoy, tipo))
         row = cur.fetchone()
 
-        # 2. El "Fallback": Si hoy está en blanco (ej. fin de semana), busca el último registro válido
+        # 2. El "Fallback": Si hoy está en blanco (ej. fin de semana), busca el último registro válido,
+        # ya fue comprobado.
         if not row:
             cur.execute('SELECT valor FROM indicadores WHERE fecha <= %s AND tipo = %s ORDER BY fecha DESC LIMIT 1',
                         (hoy, tipo))
