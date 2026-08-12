@@ -16,14 +16,14 @@ DB_NAME = os.environ.get("DB_NAME", "uf_db")
 DB_USER = os.environ.get("DB_USER", "postgres")
 DB_PASS = os.environ.get("DB_PASS", "postgres")
 
-# Token Banco Central (Inyectado por Coolify)
+# Token Banco Central
 BCC_TOKEN = os.environ.get("BCC_TOKEN", "tu_token")
 
 # Diccionario con los códigos de las series oficiales del BCCh
 SERIES = {
-    "uf": "F073.UFF.PRE.Z.D",  # Unidad de Fomento
-    "dolar": "F073.TCO.PRE.Z.D",  # Dólar Observado
-    "plata": "F073.CMB.PLA.Z.D"  # Onza Troy de Plata (Código estimado de metales)
+    "uf": "F073.UFF.PRE.Z.D",
+    "dolar": "F073.TCO.PRE.Z.D",
+    "plata": "F073.CMB.PLA.Z.D"
 }
 
 
@@ -37,7 +37,6 @@ def init_db():
         try:
             conn = get_db_connection()
             cur = conn.cursor()
-            # Creamos una tabla consolidada para manejar múltiples indicadores
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS indicadores (
                     fecha DATE,
@@ -62,20 +61,28 @@ def fetch_and_save_data():
     try:
         siete = bcchapi.Siete(BCC_TOKEN)
 
+        # Calculamos las fechas en el formato 'YYYY-MM-DD' que pide la documentación
         end_date = datetime.now().strftime('%Y-%m-%d')
         start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
 
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Iteramos sobre todos los indicadores del diccionario
         for tipo, serie in SERIES.items():
             try:
-                df = siete.cuadro({tipo: serie}, start=start_date, end=end_date)
+                # Aplicamos la sintaxis exacta de la documentación
+                df = siete.cuadro(
+                    series=[serie],
+                    desde=start_date,
+                    hasta=end_date,
+                    nombres=[tipo]
+                )
+
                 for date_index, row in df.iterrows():
                     fecha_str = date_index.strftime('%Y-%m-%d')
                     valor = float(row[tipo])
 
+                    # pd.notna() evita que guardemos los 'NaN' de días sin publicación (ej. fines de semana)
                     if pd.notna(valor):
                         cur.execute('''
                             INSERT INTO indicadores (fecha, tipo, valor)
@@ -88,7 +95,7 @@ def fetch_and_save_data():
         conn.commit()
         cur.close()
         conn.close()
-        print("Base de datos actualizada con UF, Dólar y Plata.")
+        print(f"Base de datos actualizada correctamente desde {start_date} hasta {end_date}.")
     except Exception as e:
         print(f"Error general consultando al BCCh: {e}")
 
@@ -109,11 +116,9 @@ def get_indicador_today(tipo):
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Intentamos obtener el valor del día
         cur.execute('SELECT valor FROM indicadores WHERE fecha = %s AND tipo = %s', (hoy, tipo))
         row = cur.fetchone()
 
-        # Fallback: el registro anterior más cercano si el banco aún no actualiza el día
         if not row:
             cur.execute('SELECT valor FROM indicadores WHERE fecha <= %s AND tipo = %s ORDER BY fecha DESC LIMIT 1',
                         (hoy, tipo))
@@ -131,7 +136,7 @@ def get_indicador_today(tipo):
         return f"Error interno: {str(e)}", 500
 
 
-# ----- ENDPOINTS (Rutas web) -----
+# ----- ENDPOINTS -----
 
 @app.route('/')
 @app.route('/uf')
@@ -150,4 +155,5 @@ def plata_endpoint():
 
 
 if __name__ == '__main__':
+    # Puerto ajustado a 5010
     app.run(host='0.0.0.0', port=5010)
