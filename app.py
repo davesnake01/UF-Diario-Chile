@@ -18,11 +18,11 @@ DB_PASS = os.environ.get("DB_PASS", "postgres")
 # Token Banco Central
 BCC_TOKEN = os.environ.get("BCC_TOKEN", "tu_token")
 
-# Códigos oficiales del BCCh
+# Códigos oficiales del BCCh actualizados
 SERIES = {
     "uf": "F073.UFF.PRE.Z.D",
     "dolar": "F073.TCO.PRE.Z.D",
-    "plata": "F073.CMB.PLA.Z.D"
+    "plata": "F019.PPB.PRE.45.D"  # Código exacto obtenido de la API
 }
 
 
@@ -58,7 +58,6 @@ def init_db():
 def fetch_and_save_data():
     print("Consultando API REST del Banco Central directamente...")
 
-    # Formato requerido por la URL de la API: YYYY-MM-DD
     end_date = datetime.now().strftime('%Y-%m-%d')
     start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
 
@@ -67,20 +66,16 @@ def fetch_and_save_data():
 
     for tipo, serie in SERIES.items():
         try:
-            # Construimos la consulta REST directa inyectando el token
             url = f"https://si3.bcentral.cl/SieteRestWS/SieteRestWS.ashx?function=GetSeries&timeseries={serie}&firstdate={start_date}&lastdate={end_date}&token={BCC_TOKEN}"
 
             response = requests.get(url, timeout=15)
 
-            # Si el banco devuelve un error HTML en vez de datos, lo capturamos
             try:
                 data = response.json()
             except requests.exceptions.JSONDecodeError:
-                print(
-                    f"Error crítico con {tipo}: El banco devolvió HTML en vez de JSON. Respuesta cruda: {response.text[:200]}")
+                print(f"Error crítico con {tipo}: El banco devolvió HTML en vez de JSON.")
                 continue
 
-            # Verificamos el código interno del Banco Central (0 = Éxito)
             if data.get("Codigo") != 0:
                 print(f"API BCCh rechazó la consulta de {tipo}: {data.get('Descripcion')}")
                 continue
@@ -89,7 +84,6 @@ def fetch_and_save_data():
 
             for obs in observaciones:
                 try:
-                    # La API oficial entrega la fecha en formato DD-MM-YYYY, la convertimos para PostgreSQL
                     fecha_str = datetime.strptime(obs["indexDateString"], "%d-%m-%Y").strftime("%Y-%m-%d")
                     valor = float(obs["value"])
 
@@ -99,7 +93,6 @@ def fetch_and_save_data():
                         ON CONFLICT (fecha, tipo) DO UPDATE SET valor = EXCLUDED.valor
                     ''', (fecha_str, tipo, valor))
                 except (ValueError, KeyError):
-                    # Ignora días sin valor publicado (fines de semana o feriados)
                     continue
 
         except Exception as ex:
